@@ -1,0 +1,17 @@
+# Twitter Tools v0.01
+# Author: Alex Hanna (alex.hanna@gmail.com)
+# May 2011
+
+This is a set of tools for collecting tweets from Twitter, via the
+Streaming and RESTful APIs.  This set of tools is in no way fully
+exploits the potential of what can be done with the Twitter API.  I
+admit that they were first written the summer of 2010 to collect data
+around the 2010 US midterm elections.  
+
+My vision for this toolset is to extend it in such a way that
+researchers like myself can collect and use Twitter datasets easily
+and without much technical knowledge.  I work in the social sciences
+and passing someone a Perl script when they think that /bin/bash is a
+social event isn't the most useful thing to do.
+
+ 
