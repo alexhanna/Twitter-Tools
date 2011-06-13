@@ -17,6 +17,7 @@ in_reply_to_status_id     BIGINT UNSIGNED,
 in_reply_to_user_id       INT UNSIGNED,
 created_at                DATETIME NOT NULL,
 INDEX(in_reply_to_user_id),
+UNIQUE(status_id),
 FOREIGN KEY (user_id)
   REFERENCES static_userinfo (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
