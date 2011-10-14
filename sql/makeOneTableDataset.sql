@@ -13,12 +13,12 @@ SELECT
     u.url         AS "User URL",
     u.lang        AS "User Language",
     u.time_zone   AS "User Timezone",
-    s.created_at  AS "User Created At"
+    s.created_at  AS "User Created At",
 
     u.followers_count AS "User Follow Count",
     u.friends_count   AS "User Followee Count",
-    u.statuses_count  AS "User Status Count",
+    u.statuses_count  AS "User Status Count"
     
       FROM tweet t
-INNER JOIN tweet_userinfo  u INNER JOIN (t.status_id = u.status_id)
-INNER JOIN static_userinfo s INNER JOIN (t.user_id   = s.user_id)
+INNER JOIN tweet_userinfo  u ON (t.status_id = u.status_id)
+INNER JOIN static_userinfo s ON (t.user_id   = s.user_id)
