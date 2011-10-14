@@ -27,7 +27,7 @@ my($s_dbuser) = '';
 my($s_dbpass) = '';
 my($s_dbhost) = '';
 
-my($dbh) = DBI->connect("DBI:mysql:database=$r_dbname;hostname=$r_dbuser;port=3306", 
+my($dbh_r) = DBI->connect("DBI:mysql:database=$r_dbname;hostname=$r_dbhost;port=3306", 
                         $r_dbuser, 
                         $r_dbpass,                                               
                         {
@@ -36,8 +36,10 @@ my($dbh) = DBI->connect("DBI:mysql:database=$r_dbname;hostname=$r_dbuser;port=33
 
 my($dbh_s) = DBI->connect("DBI:mysql:database=$s_dbname;hostname=$s_dbhost;port=3306", 
                           $s_dbuser, 
-                          $s_dbpass)
-    or die $DBI::errstr;
+                          $s_dbpass,
+                          {
+                              AutoCommit => 0
+                          }) or die $DBI::errstr;
 
 my $strp = new DateTime::Format::Strptime(
     pattern     => '%a %b %d %T +0000 %Y',
@@ -77,7 +79,7 @@ created_at                DATETIME NOT NULL
             my($created_at) = $strp->parse_datetime($user->{created_at}) if $user->{created_at};
             
             my($sql)  = "INSERT INTO static_userinfo (user_id, created_at) VALUES (?,?)";
-            my($sth)  = $dbh->prepare($sql);
+            my($sth)  = $dbh_s->prepare($sql);
         
             my(@bind) = map { $user->{$_} } @userinfo;
             push @bind, $created_at;
@@ -111,7 +113,7 @@ FOREIGN KEY (user_id)
         my($sql) = "INSERT INTO tweet (status_id, text, source, " . 
             "in_reply_to_status_id, in_reply_to_user_id, user_id, " .
             "geo, retweet_id, created_at) VALUES (?,?,?, ?,?,?, ?,?,?)";
-        my($sth) = $dbh->prepare($sql);
+        my($sth) = $dbh_s->prepare($sql);
         
         my(@bind) = map { $json->{$_} } @tweetinfo;
         push @bind, $user->{id}, $geo, $retweet_id, $created_at;
@@ -141,16 +143,23 @@ UNIQUE(status_id),
 INDEX(user_id)
 =cut
 
-    ## time and tweet specific user info
-        my(@tweetuserinfo) = qw/user_id name screen_name description profile_image_url url location time_zone lang user_id followers_count friends_count statuses_count listed_count/;
-        $sql = "INSERT INTO tweet_userinfo (user_id, name, screen_name, description," .
+        ## time and tweet specific user info
+        my(@tweetuserinfo) = qw/name screen_name description
+                               profile_image_url url location
+                               time_zone lang followers_count 
+                               friends_count statuses_count listed_count/;
+
+        $sql = "INSERT INTO tweet_userinfo (" .
+            "name, screen_name, description, " . 
             "profile_image_url, url, location," . 
-            "time_zone, lang, user_id, followers_count, " .
-            "friends_count, statuses_count, listed_count, status_id) " .
-            "VALUES (?,?,?, ?,?,?, ?,?,?, ?,?,?,?)";
-        $sth = $dbh->prepare($sql);
+            "time_zone, lang, followers_count, " .
+            "friends_count, statuses_count, listed_count, " .
+            "user_id, status_id) " .
+            "VALUES (?,?,?, ?,?,?, ?,?,?, ?,?,?, ?,?)";
+        $sth = $dbh_s->prepare($sql);
         
-        @bind = map { $user->{$_} } @tweetuserinfo;
+        @bind = map { $user->{$_} ? $user->{$_} : '' } @tweetuserinfo;
+
         push @bind, $user->{id}, $json->{id};
         $sth->execute( @bind );
         
@@ -194,11 +203,11 @@ FOREIGN KEY (status_id)
             }
             
             $sql = "INSERT INTO tweet_entity (status_id, type, value) VALUES " . ( join ',', @str );
-            $sth = $dbh->prepare($sql);
+            $sth = $dbh_s->prepare($sql);
             $sth->execute(@bind);
         }
         
-        $dbh->commit();
+        $dbh_s->commit();
         $added++;
         $statuses{$json->{id}} = 1;
         
@@ -206,15 +215,15 @@ FOREIGN KEY (status_id)
     };
     if ($@) {
         warn "Couldn't add ", $json->{id}, "\t", $@, "\n";
-        $dbh->rollback();
+        $dbh_s->rollback();
         return 0;
     } 
 }
 
 sub main {
     print "Loading userinfo...", "\n";
-    my($sql) = 'SELECT user_id FROM userinfo';
-    my($sth) = $dbh->prepare($sql);
+    my($sql) = 'SELECT user_id FROM static_userinfo';
+    my($sth) = $dbh_s->prepare($sql);
     $sth->execute();    
 
     while(my($user) = $sth->fetchrow_array()) {
@@ -223,12 +232,16 @@ sub main {
 
     print "Loading existing tweets...", "\n";
     $sql = 'SELECT status_id FROM tweet';
-    $sth = $dbh->prepare($sql);
+    $sth = $dbh_s->prepare($sql);
     $sth->execute();
 
     while(my($status) = $sth->fetchrow_array()) {
         $statuses{$status} = 1;
     }
+
+    ## put lines that do not pass json eval in this file and reprocess
+    ## fixme: make sure that all of json eval happens in this file
+    open(my $fh, '>>', 'json_errors.json');
 
     my($start) = 0;
     my($limit) = 1000;
@@ -236,14 +249,13 @@ sub main {
         print $i, "\n";
 
         $sql      = "SELECT json FROM firehose_queue WHERE id > ? AND id <= ?";
-        my($sth2) =  $dbh_s->prepare($sql);
+        my($sth2) =  $dbh_r->prepare($sql);
         $sth2->execute( $i , $i + $limit );
 
         ## if nothing is returned, then sleep and wait for more tweets to accrue
         unless ($sth2->rows()) {
             print "Sleeping...", "\n";
-            sleep(3600);
-            
+            sleep(3600);            
         } else {
             while(my($tweet) = $sth2->fetchrow_array()) {
                 chomp $tweet;
@@ -251,28 +263,28 @@ sub main {
                 next() unless $tweet;
                 next() if $tweet =~ m/^\s+$/;
                 
-                my($json)  = undef;
-                
-                do {
-                    eval {
-                        $json = decode_json($tweet);            
-                    };
-                    if ($@) {
-                        warn $@;
-                    }
-                    
-                    sleep(1);
-                } while(!$json)
+                my($json)    = undef;
+                eval {
+                    $json = decode_json($tweet);
+                };
+                if ($@) {
+                    warn $@;
+                    print $fh $tweet;
+                    print $fh "\n";
+                    next();
+                }
                 
                 unless ($json->{delete}) {
+                    next() if $statuses{$json->{id}};
                     insertTweet($json, 0);
+                    print $added, "\n";
                 } else {   
                     $sql = "INSERT INTO delete_tweet (status_id, user_id) VALUES (?,?)";
-                    $sth = $dbh->prepare($sql);
+                    $sth = $dbh_s->prepare($sql);
                     $sth->execute($json->{delete}->{status}->{id}, $json->{delete}->{status}->{user_id});        
                     $deleted++;
                 }
-            }        
+            }    
         }
     }
 }
