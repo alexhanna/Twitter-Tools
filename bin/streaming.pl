@@ -108,8 +108,10 @@ sub setupForm {
     return \%form;
 }
 
+## TK: Need to convert this to secure
+
 sub run_thread {
-    my($stream_url) = 'http://stream.twitter.com/1/statuses/filter.json';
+    my($stream_url) = 'https://stream.twitter.com/1/statuses/filter.json';
 
     my($username) = $ARGV[0];
     my($password) = '';
